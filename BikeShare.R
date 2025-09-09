@@ -32,16 +32,16 @@ plot_temp <- ggplot(train, aes(x = temp)) +
   geom_histogram(fill = "pink", bins = 30) +
   labs(title = "Temperature Distribution", x = "Temperature", y = "Frequency")
 
-plot_count <- ggplot(train, aes(x = temp, y = count)) +
-  geom_point(alpha = 0.5, color = "pink") +
-  labs(title = "Temp vs Bike Count", x = "Temperature", y = "Count")
+plot_holiday <- ggplot(train, aes(x = factor(holiday), y = count)) +
+  geom_boxplot(fill = "pink", alpha = 0.6) +
+  labs(title = "Bike Count by Holiday", x = "Holiday (0 = No, 1 = Yes)", y = "Count")
 
 plot_season <- ggplot(train, aes(x = factor(season), y = count)) +
   geom_boxplot(fill = "pink", alpha = 0.6) +
   labs(title = "Bike Count by Season", x = "Season", y = "Count")
 
 # Combine all panels
-combined_plot <- (plot_weather | plot_temp) / (plot_count | plot_season)
+combined_plot <- (plot_weather | plot_temp) / (plot_holiday | plot_season)
 
 # Show combined plot
 print(combined_plot)
