@@ -45,3 +45,56 @@ combined_plot <- (plot_weather | plot_temp) / (plot_holiday | plot_season)
 
 # Show combined plot
 print(combined_plot)
+
+
+# train
+
+train <- train |> 
+  mutate(
+    hour = hour(datetime),
+    wday = wday(datetime, label = TRUE),
+    month = month(datetime),
+    year = year(datetime),
+    log_count = log1p(count)  
+  )
+
+
+
+
+### test
+
+test <- test |> 
+  mutate(
+    hour = hour(datetime),
+    wday = wday(datetime, label = TRUE),
+    month = month(datetime),
+    year = year(datetime)
+  )
+
+
+
+
+### Linear Regression Model
+my_linear_model <- linear_reg() |>                       
+  set_engine("lm") |>                                    
+  set_mode("regression") |>                              
+  fit(
+    formula = log_count ~ season + holiday + workingday + weather +
+      temp + atemp + humidity + windspeed + hour + wday + month + year,
+    data = train
+  )
+
+### Predictions Using Linear Model
+bike_predictions <- predict(my_linear_model, new_data = test)  
+bike_predictions  
+
+### Format the Predictions for Submission to Kaggle
+kaggle_submission <- bike_predictions |> 
+  bind_cols(test) |>                                   
+  mutate(count = exp(.pred) - 1) |>                        
+  mutate(count = round(pmax(0, count))) |>                
+  select(datetime, count) |>                             
+  mutate(datetime = as.character(format(datetime)))        
+
+## Write out the file
+vroom_write(x = kaggle_submission, file = "./kagglesubmission.csv", delim = ",")
