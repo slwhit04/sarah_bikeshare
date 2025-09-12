@@ -3,11 +3,13 @@
 library(tidyverse)
 library(tidymodels)
 library(vroom)
+library(lubridate)
 library(ggplot2)
 library(patchwork)
 library(skimr)
 
 
+# load data
 train <- vroom("C:/Users/19132/Downloads/train.csv")
 test <- vroom("C:/Users/19132/Downloads/test.csv")
 
@@ -19,7 +21,6 @@ View(test)
 
 # Skim the dataset
 skim(train)
-
 
 ### ggplot thing
 
@@ -46,43 +47,62 @@ combined_plot <- (plot_weather | plot_temp) / (plot_holiday | plot_season)
 # Show combined plot
 print(combined_plot)
 
-
-# train
+### cleaning
 
 train <- train |> 
-  mutate(
-    hour = hour(datetime),
-    wday = wday(datetime, label = TRUE),
-    month = month(datetime),
-    year = year(datetime),
-    log_count = log1p(count)  
-  )
+  select(-casual, -registered) |> 
+  mutate(count = log1p(count))
+
+bike_recipe <- recipe(count ~ ., data = train) |> 
+  step_mutate(hour = hour(datetime)) |> 
+  step_mutate(season = factor(season)) |> 
+  step_mutate(month = month(datetime)) |> 
+  step_rm(datetime)
 
 
 
-
-### test
-
-test <- test |> 
-  mutate(
-    hour = hour(datetime),
-    wday = wday(datetime, label = TRUE),
-    month = month(datetime),
-    year = year(datetime)
-  )
-
+# # train
+# 
+# train <- train |> 
+#   mutate(
+#     hour = hour(datetime),
+#     wday = wday(datetime, label = TRUE),
+#     month = month(datetime),
+#     year = year(datetime),
+#     log_count = log1p(count)  
+#   )
+# 
+# 
+# ### test
+# 
+# test <- test |> 
+#   mutate(
+#     hour = hour(datetime),
+#     wday = wday(datetime, label = TRUE),
+#     month = month(datetime),
+#     year = year(datetime)
+#   )
 
 
 
 ### Linear Regression Model
-my_linear_model <- linear_reg() |>                       
-  set_engine("lm") |>                                    
-  set_mode("regression") |>                              
-  fit(
-    formula = log_count ~ season + holiday + workingday + weather +
-      temp + atemp + humidity + windspeed + hour + wday + month + year,
-    data = train
-  )
+my_linear_model <- workflow() |> 
+  add_model(
+    linear_reg() |> 
+      set_engine("lm") |> 
+      set_mode("regression")) |> 
+  add_recipe(bike_recipe) |> 
+  fit(data = train)
+
+
+# my_linear_model <- linear_reg() |>                       
+#   set_engine("lm") |>                                    
+#   set_mode("regression") |>                              
+#   fit(
+#     formula = log_count ~ season + holiday + workingday + weather +
+#       temp + atemp + humidity + windspeed + hour + wday + month + year,
+#     data = train
+#   )
 
 ### Predictions Using Linear Model
 bike_predictions <- predict(my_linear_model, new_data = test)  
@@ -94,7 +114,11 @@ kaggle_submission <- bike_predictions |>
   mutate(count = exp(.pred) - 1) |>                        
   mutate(count = round(pmax(0, count))) |>                
   select(datetime, count) |>                             
-  mutate(datetime = as.character(format(datetime)))        
+  mutate(datetime = as.character(format(datetime))) 
+
+data <- prep(bike_recipe) |> 
+  bake(new_data = train)
+head(data, 5)
 
 ## Write out the file
-vroom_write(x = kaggle_submission, file = "./kagglesubmission.csv", delim = ",")
+vroom_write(x = kaggle_submission, file = "./kagglesubmission2.csv", delim = ",")
