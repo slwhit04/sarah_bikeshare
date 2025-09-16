@@ -1,3 +1,7 @@
+# sin and cosine hour and time?
+# break hour into factor by hour in the week so there is a whooole bunch of 0's and 1's
+
+
 # load libraries
 
 library(tidyverse)
@@ -54,61 +58,51 @@ train <- train |>
   mutate(count = log1p(count))
 
 bike_recipe <- recipe(count ~ ., data = train) |> 
-  step_mutate(hour = hour(datetime)) |> 
-  step_mutate(season = factor(season)) |> 
-  step_mutate(month = month(datetime)) |> 
-  step_rm(datetime)
+  # extract features from datetime
+  step_mutate(hour = hour(datetime),
+              wday = wday(datetime),
+              month = month(datetime),
+              year = year(datetime)) |> 
+  
+  # cyclic encodings for hour
+  step_mutate(
+    sin_hour = sin(2 * pi * hour / 24),
+    cos_hour = cos(2 * pi * hour / 24)
+  ) |> 
+  
+  # (optional) cyclic encodings for day of week (7 days)
+  step_mutate(
+    sin_wday = sin(2 * pi * wday / 7),
+    cos_wday = cos(2 * pi * wday / 7)
+  ) |> 
+  
+  # remove raw datetime + raw hour/wday if you don’t want them duplicated
+  step_rm(datetime, hour, wday) |> 
+  
+  # handle categoricals & scaling
+  step_dummy(all_nominal_predictors()) |>   
+  step_normalize(all_numeric_predictors())
 
 
+### penalized regresssion
+### Fit penalized regression with one penalty/mixture combo
+my_model <- linear_reg(
+  penalty = 0.001,   # chosen penalty
+  mixture = 0.5     # chosen mixture
+) |> 
+  set_engine("glmnet")
 
-# # train
-# 
-# train <- train |> 
-#   mutate(
-#     hour = hour(datetime),
-#     wday = wday(datetime, label = TRUE),
-#     month = month(datetime),
-#     year = year(datetime),
-#     log_count = log1p(count)  
-#   )
-# 
-# 
-# ### test
-# 
-# test <- test |> 
-#   mutate(
-#     hour = hour(datetime),
-#     wday = wday(datetime, label = TRUE),
-#     month = month(datetime),
-#     year = year(datetime)
-#   )
+wf <- workflow() |> 
+  add_model(my_model) |> 
+  add_recipe(bike_recipe)
 
-
-
-### Linear Regression Model
-my_linear_model <- workflow() |> 
-  add_model(
-    linear_reg() |> 
-      set_engine("lm") |> 
-      set_mode("regression")) |> 
-  add_recipe(bike_recipe) |> 
+final_fit <- wf |> 
   fit(data = train)
 
+### Predictions
+bike_predictions <- predict(final_fit, new_data = test)
 
-# my_linear_model <- linear_reg() |>                       
-#   set_engine("lm") |>                                    
-#   set_mode("regression") |>                              
-#   fit(
-#     formula = log_count ~ season + holiday + workingday + weather +
-#       temp + atemp + humidity + windspeed + hour + wday + month + year,
-#     data = train
-#   )
-
-### Predictions Using Linear Model
-bike_predictions <- predict(my_linear_model, new_data = test)  
-bike_predictions  
-
-### Format the Predictions for Submission to Kaggle
+### Format the Predictions for Kaggle
 kaggle_submission <- bike_predictions |> 
   bind_cols(test) |>                                   
   mutate(count = exp(.pred) - 1) |>                        
@@ -116,9 +110,10 @@ kaggle_submission <- bike_predictions |>
   select(datetime, count) |>                             
   mutate(datetime = as.character(format(datetime))) 
 
+### Prep data (optional: to inspect)
 data <- prep(bike_recipe) |> 
   bake(new_data = train)
 head(data, 5)
 
-## Write out the file
-vroom_write(x = kaggle_submission, file = "./kagglesubmission2.csv", delim = ",")
+### Write out the file
+vroom_write(x = kaggle_submission, file = "./kagglesubmission3.csv", delim = ",")
