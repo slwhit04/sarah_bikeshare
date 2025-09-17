@@ -1,7 +1,3 @@
-# sin and cosine hour and time?
-# break hour into factor by hour in the week so there is a whooole bunch of 0's and 1's
-
-
 # load libraries
 
 library(tidyverse)
@@ -27,7 +23,6 @@ View(test)
 skim(train)
 
 ### ggplot thing
-
 
 plot_weather <- ggplot(train, aes(x = factor(weather))) +
   geom_bar(fill = "pink") +
@@ -70,37 +65,98 @@ bike_recipe <- recipe(count ~ ., data = train) |>
     cos_hour = cos(2 * pi * hour / 24)
   ) |> 
   
-  # (optional) cyclic encodings for day of week (7 days)
+  # cyclic encodings for day of week
   step_mutate(
     sin_wday = sin(2 * pi * wday / 7),
     cos_wday = cos(2 * pi * wday / 7)
   ) |> 
   
-  # remove raw datetime + raw hour/wday if you don’t want them duplicated
-  step_rm(datetime, hour, wday) |> 
+  # cyclic encodings for month
+  step_mutate(
+    sin_month = sin(2 * pi * month / 12),
+    cos_month = cos(2 * pi * month / 12)
+  ) |> 
+  
+  # remove raw datetime + raw hour/wday/month
+  step_rm(datetime, hour, wday, month) |> 
   
   # handle categoricals & scaling
   step_dummy(all_nominal_predictors()) |>   
   step_normalize(all_numeric_predictors())
 
 
-### penalized regresssion
-### Fit penalized regression with one penalty/mixture combo
-my_model <- linear_reg(
-  penalty = 0.001,   # chosen penalty
-  mixture = 0.5     # chosen mixture
+  
+
+### penalized regression
+
+# --- OLD SINGLE FIT (commented out now) ---
+# my_model <- linear_reg(
+#   penalty = 0.01,   # chosen penalty
+#   mixture = 0.5     # chosen mixture
+# ) |> 
+#   set_engine("glmnet")
+#
+# wf <- workflow() |> 
+#   add_model(my_model) |> 
+#   add_recipe(bike_recipe)
+#
+# final_fit <- wf |> 
+#   fit(data = train)
+#
+# ### Predictions (old single fit)
+# bike_predictions <- predict(final_fit, new_data = test)
+
+# --- NEW: TUNED PENALIZED REGRESSION ---
+
+## Define model with tunable penalty & mixture
+preg_model <- linear_reg(
+  penalty = tune(),
+  mixture = tune()
 ) |> 
   set_engine("glmnet")
 
-wf <- workflow() |> 
-  add_model(my_model) |> 
-  add_recipe(bike_recipe)
+## Workflow
+preg_wf <- workflow() |> 
+  add_recipe(bike_recipe) |> 
+  add_model(preg_model)
 
-final_fit <- wf |> 
+## Grid of tuning parameters
+grid_of_tuning_params <- grid_regular(
+  penalty(range = c(-4, 1)),  
+  mixture(),                  
+  levels = 10                 
+)
+
+
+## Cross-validation folds
+set.seed(4)  # for reproducibility
+folds <- vfold_cv(train, v = 5)
+
+## Run CV
+CV_results <- preg_wf |> 
+  tune_grid(
+    resamples = folds,
+    grid = grid_of_tuning_params,
+    metrics = metric_set(rmse, mae)
+  )
+
+## Plot RMSE vs penalty (optional visualization)
+collect_metrics(CV_results) |> 
+  filter(.metric == "rmse") |> 
+  ggplot(aes(x = penalty, y = mean, color = factor(mixture))) +
+  geom_line()
+
+## Find best tuning parameters
+bestTune <- CV_results |> 
+  select_best(metric = "rmse")
+
+## Finalize workflow
+final_wf <- preg_wf |> 
+  finalize_workflow(bestTune) |> 
   fit(data = train)
 
-### Predictions
-bike_predictions <- predict(final_fit, new_data = test)
+## Predictions with tuned model
+bike_predictions <- predict(final_wf, new_data = test)
 
 ### Format the Predictions for Kaggle
 kaggle_submission <- bike_predictions |> 
@@ -109,11 +165,6 @@ kaggle_submission <- bike_predictions |>
   mutate(count = round(pmax(0, count))) |>                
   select(datetime, count) |>                             
   mutate(datetime = as.character(format(datetime))) 
-
-### Prep data (optional: to inspect)
-data <- prep(bike_recipe) |> 
-  bake(new_data = train)
-head(data, 5)
 
 ### Write out the file
 vroom_write(x = kaggle_submission, file = "./kagglesubmission3.csv", delim = ",")
